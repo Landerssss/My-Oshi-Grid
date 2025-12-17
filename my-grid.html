@@ -3,16 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>我的推格子生成器 (修复版)</title>
-    <!-- 使用国内 BootCDN 镜像，加载更快 -->
+    <title>我的推格子 v3.0 (拖拽+缩放版)</title>
     <script src="https://cdn.bootcdn.net/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <style>
-        /* 基础重置 */
-        * { box-sizing: border-box; }
+        * { box-sizing: border-box; user-select: none; }
         
         body {
-            font-family: sans-serif;
-            background-color: #121212; /* 深色背景 */
+            font-family: 'Segoe UI', sans-serif;
+            background-color: #121212;
             color: #ffffff;
             margin: 0;
             padding: 20px;
@@ -23,7 +21,6 @@
 
         h1 { margin-bottom: 20px; color: #ff8fab; }
 
-        /* 控制栏样式 */
         .controls {
             background: #2d2d2d;
             padding: 15px;
@@ -55,7 +52,12 @@
         }
         button:hover { background-color: #ffb6c1; }
 
-        /* 画布区域 - 这是最终保存为图片的区域 */
+        .tips {
+            font-size: 12px;
+            color: #888;
+            margin-bottom: 10px;
+        }
+
         #capture-area {
             background-color: #121212;
             padding: 30px;
@@ -64,11 +66,10 @@
             display: flex;
             flex-direction: column;
             align-items: center;
-            width: fit-content; /* 宽度自适应内容 */
+            width: fit-content;
             margin: 0 auto;
         }
 
-        /* 标题输入框 */
         .grid-title {
             background: transparent;
             border: none;
@@ -81,61 +82,70 @@
             outline: none;
         }
 
-        /* 格子容器 */
         .grid-container {
             display: grid;
             gap: 10px;
-            /* 默认值，会被JS覆盖 */
-            grid-template-columns: repeat(3, 1fr); 
         }
 
-        /* 单个格子样式 */
         .grid-item {
             background-color: #1e1e1e;
-            border: 2px dashed #444; /* 虚线边框，确保空状态可见 */
+            border: 2px dashed #444;
             border-radius: 8px;
             position: relative;
             overflow: hidden;
-            cursor: pointer;
             display: flex;
             flex-direction: column;
-            transition: all 0.2s;
+            transition: border-color 0.2s;
         }
 
-        .grid-item:hover {
-            border-color: #ff8fab;
-            background-color: #2a2a2a;
+        /* 拖拽进入时的样式 */
+        .grid-item.drag-over {
+            border-color: #fff;
+            background-color: #333;
         }
 
-        /* 图片容器 */
+        /* 编辑模式（缩放模式） */
+        .grid-item.editing {
+            border: 2px solid #ff4757; /* 红色边框提示正在编辑 */
+            cursor: move; /* 提示可以移动图片 */
+        }
+
         .img-area {
-            flex: 1; /* 占据剩余空间 */
+            flex: 1;
             width: 100%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
+            height: 100%;
             position: relative;
+            overflow: hidden; /* 必须隐藏溢出，否则缩放会盖住别的格子 */
+            cursor: pointer;
         }
 
-        /* 上传后的图片 */
         .img-area img {
             width: 100%;
             height: 100%;
-            object-fit: cover; /* 保持比例填满 */
-            display: none; /* 默认隐藏 */
+            object-fit: cover;
+            display: none;
             position: absolute;
             top: 0;
             left: 0;
+            transform-origin: center center;
+            pointer-events: none; /* 默认不响应鼠标，由父级响应 */
         }
 
-        /* 加号提示 */
+        /* 编辑模式下，图片需要响应鼠标才能被拖动位置 */
+        .grid-item.editing .img-area img {
+            /* object-fit: cover;  在编辑模式下我们可能需要移除这个属性完全靠transform控制，或者保留它作为基准 */
+        }
+
         .upload-icon {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
             font-size: 40px;
             color: #555;
             pointer-events: none;
         }
 
-        /* 底部文字输入 */
         .item-input {
             width: 100%;
             background: rgba(0,0,0,0.8);
@@ -145,7 +155,8 @@
             font-size: 12px;
             padding: 6px 2px;
             outline: none;
-            z-index: 2; /* 确保在图片上方 */
+            z-index: 10;
+            cursor: text;
         }
 
         .watermark {
@@ -155,43 +166,35 @@
             align-self: flex-end;
         }
 
-        /* 隐藏文件输入框 */
         #hidden-file-input { display: none; }
 
     </style>
 </head>
 <body>
 
-    <h1>✨ 我的推格子 (My Oshi Grid)</h1>
+    <h1>✨ 我的推格子 v3.0</h1>
+    <div class="tips">💡 提示：按住图片可拖拽交换位置 | <b>双击图片</b>开启缩放/平移模式</div>
 
     <div class="controls">
-        <label>选择布局：</label>
         <select id="layout-select">
             <option value="3x3">九宫格 (3x3)</option>
             <option value="4x3">大满贯 (4x3)</option>
             <option value="5x3">宽屏 (5x3)</option>
             <option value="2x2">四宫格 (2x2)</option>
         </select>
-        <input type="text" id="main-title-input" value="我的年度动画列表" placeholder="输入总标题">
+        <input type="text" id="main-title-input" value="我的年度动画列表">
         <button onclick="downloadImage()">⬇️ 保存图片</button>
     </div>
 
-    <!-- 生成区域 -->
     <div id="capture-area">
         <input type="text" class="grid-title" id="display-title" value="我的年度动画列表">
-        
-        <div class="grid-container" id="grid-box">
-            <!-- JS 会在这里生成格子 -->
-        </div>
-
+        <div class="grid-container" id="grid-box"></div>
         <div class="watermark">github.com/ywh555hhh/anime-role-grid</div>
     </div>
 
-    <!-- 隐藏的 input 用于触发上传 -->
     <input type="file" id="hidden-file-input" accept="image/*">
 
     <script>
-        // 配置数据
         const layouts = {
             '3x3': { cols: 3, rows: 3, width: 110, height: 150 },
             '4x3': { cols: 4, rows: 3, width: 100, height: 140 },
@@ -205,29 +208,22 @@
         const titleInput = document.getElementById('main-title-input');
         const displayTitle = document.getElementById('display-title');
         
-        let currentClickImg = null; // 记录当前点击的是哪个格子的图片
+        let currentUploadTarget = null;
+        let dragSourceIndex = null;
+        
+        // 编辑模式变量
+        let editingItem = null;
+        let isDraggingImage = false;
+        let startX, startY, initialTranslateX, initialTranslateY;
 
-        // 初始化
-        window.onload = function() {
-            render('3x3'); // 默认加载 3x3
-        };
+        window.onload = function() { render('3x3'); };
 
-        // 切换布局
-        layoutSelect.addEventListener('change', (e) => {
-            render(e.target.value);
-        });
+        layoutSelect.addEventListener('change', (e) => render(e.target.value));
+        titleInput.addEventListener('input', (e) => displayTitle.value = e.target.value);
 
-        // 标题同步
-        titleInput.addEventListener('input', (e) => {
-            displayTitle.value = e.target.value;
-        });
-
-        // 核心渲染函数
         function render(type) {
             const config = layouts[type];
-            gridBox.innerHTML = ''; // 清空当前
-            
-            // 设置 CSS Grid
+            gridBox.innerHTML = '';
             gridBox.style.gridTemplateColumns = `repeat(${config.cols}, ${config.width}px)`;
 
             const total = config.cols * config.rows;
@@ -236,30 +232,43 @@
                 const item = document.createElement('div');
                 item.className = 'grid-item';
                 item.style.height = config.height + 'px';
-                
-                // 点击格子触发上传
-                item.onclick = function() {
-                    currentClickImg = this.querySelector('img'); // 找到这个格子里的 img 标签
-                    const icon = this.querySelector('.upload-icon'); // 找到图标
-                    
-                    // 绑定一个一次性的事件，用于上传后隐藏图标
-                    fileInput.onchange = function(e) {
-                        if (e.target.files && e.target.files[0]) {
-                            const reader = new FileReader();
-                            reader.onload = function(evt) {
-                                currentClickImg.src = evt.target.result;
-                                currentClickImg.style.display = 'block';
-                                icon.style.display = 'none'; // 隐藏加号
-                            };
-                            reader.readAsDataURL(e.target.files[0]);
-                        }
-                        fileInput.value = ''; // 清空，允许重复选同一张
-                    };
-                    
-                    fileInput.click(); // 触发真正的文件选择框
-                };
+                item.dataset.index = i; // 存储索引用于交换
 
-                // 内部 HTML
+                // 初始化 Transform 数据
+                item.dataset.scale = 1;
+                item.dataset.x = 0;
+                item.dataset.y = 0;
+
+                // --- 1. 拖拽交换逻辑 (Drag & Drop) ---
+                item.draggable = true; // 允许拖拽整个格子
+
+                item.addEventListener('dragstart', function(e) {
+                    if (editingItem) return e.preventDefault(); // 编辑模式下禁止交换
+                    dragSourceIndex = this.dataset.index;
+                    e.dataTransfer.effectAllowed = 'move';
+                });
+
+                item.addEventListener('dragover', function(e) {
+                    e.preventDefault(); // 允许放置
+                    this.classList.add('drag-over');
+                });
+
+                item.addEventListener('dragleave', function(e) {
+                    this.classList.remove('drag-over');
+                });
+
+                item.addEventListener('drop', function(e) {
+                    e.preventDefault();
+                    this.classList.remove('drag-over');
+                    const sourceIndex = dragSourceIndex;
+                    const targetIndex = this.dataset.index;
+                    
+                    if (sourceIndex !== targetIndex) {
+                        swapImages(sourceIndex, targetIndex);
+                    }
+                });
+
+                // --- 2. 内部结构与点击上传 ---
                 item.innerHTML = `
                     <div class="img-area">
                         <span class="upload-icon">+</span>
@@ -267,31 +276,203 @@
                     </div>
                     <input type="text" class="item-input" placeholder="点击输入" onclick="event.stopPropagation()">
                 `;
-                // 注意：输入框的 onclick 需要阻止冒泡，否则会触发外层的上传图片
-                
+
+                // 点击上传 (仅在非编辑模式下)
+                const imgArea = item.querySelector('.img-area');
+                imgArea.onclick = function(e) {
+                    if (item.classList.contains('editing')) return; // 编辑模式下点击无效（防止冲突）
+                    
+                    const img = this.querySelector('img');
+                    // 如果已经有图，点击不触发上传，除非是空的
+                    if (img.style.display !== 'block') {
+                         triggerUpload(img, item);
+                    }
+                };
+
+                // --- 3. 双击进入编辑模式 (Zoom/Pan) ---
+                imgArea.addEventListener('dblclick', function(e) {
+                    e.stopPropagation(); // 防止冒泡
+                    const img = this.querySelector('img');
+                    if (img.style.display !== 'block') {
+                        triggerUpload(img, item); // 没图时双击也是上传
+                        return;
+                    }
+                    toggleEditMode(item);
+                });
+
                 gridBox.appendChild(item);
             }
         }
 
-        // 导出图片功能
-        function downloadImage() {
-            const node = document.getElementById('capture-area');
-            
-            if (typeof html2canvas === 'undefined') {
-                alert('图片生成插件未加载（可能是网络原因），请检查网络后刷新页面。');
-                return;
+        // 触发上传
+        function triggerUpload(imgElement, itemElement) {
+            currentUploadTarget = { img: imgElement, item: itemElement };
+            fileInput.value = '';
+            fileInput.click();
+        }
+
+        fileInput.addEventListener('change', function(e) {
+            if (e.target.files && e.target.files[0] && currentUploadTarget) {
+                const reader = new FileReader();
+                reader.onload = function(evt) {
+                    const img = currentUploadTarget.img;
+                    const item = currentUploadTarget.item;
+                    
+                    img.src = evt.target.result;
+                    img.style.display = 'block';
+                    item.querySelector('.upload-icon').style.display = 'none';
+                    
+                    // 重置变换
+                    resetTransform(item);
+                };
+                reader.readAsDataURL(e.target.files[0]);
+            }
+        });
+
+        // 交换图片函数
+        function swapImages(idx1, idx2) {
+            const items = document.querySelectorAll('.grid-item');
+            const item1 = items[idx1];
+            const item2 = items[idx2];
+            const img1 = item1.querySelector('img');
+            const img2 = item2.querySelector('img');
+            const icon1 = item1.querySelector('.upload-icon');
+            const icon2 = item2.querySelector('.upload-icon');
+
+            // 交换 Src
+            const tempSrc = img1.src;
+            img1.src = img2.src;
+            img2.src = tempSrc;
+
+            // 交换显示状态
+            const tempDisplay = img1.style.display;
+            img1.style.display = img2.style.display;
+            img2.style.display = tempDisplay;
+
+            // 交换图标显示
+            const tempIcon = icon1.style.display;
+            icon1.style.display = icon2.style.display;
+            icon2.style.display = tempIcon;
+
+            // 交换变换数据 (缩放/位置) - 让你辛苦调好的位置也跟着走
+            const scale1 = item1.dataset.scale; const x1 = item1.dataset.x; const y1 = item1.dataset.y;
+            const scale2 = item2.dataset.scale; const x2 = item2.dataset.x; const y2 = item2.dataset.y;
+
+            updateTransform(item1, scale2, x2, y2);
+            updateTransform(item2, scale1, x1, y1);
+        }
+
+        // --- 编辑模式核心逻辑 ---
+
+        function toggleEditMode(item) {
+            // 如果已经在编辑别的，先退出那个
+            if (editingItem && editingItem !== item) {
+                exitEditMode();
             }
 
+            if (item.classList.contains('editing')) {
+                exitEditMode();
+            } else {
+                enterEditMode(item);
+            }
+        }
+
+        function enterEditMode(item) {
+            editingItem = item;
+            item.classList.add('editing');
+            item.draggable = false; // 编辑时禁止拖拽格子交换
+            
+            // 绑定滚轮缩放
+            item.onwheel = function(e) {
+                e.preventDefault();
+                let scale = parseFloat(item.dataset.scale);
+                if (e.deltaY < 0) scale += 0.1;
+                else scale -= 0.1;
+                if (scale < 0.5) scale = 0.5; // 最小缩放
+                if (scale > 5) scale = 5;     // 最大缩放
+                
+                updateTransform(item, scale, item.dataset.x, item.dataset.y);
+            };
+
+            // 绑定鼠标拖拽平移
+            item.onmousedown = function(e) {
+                if (e.target.tagName === 'INPUT') return; // 不影响输入框
+                isDraggingImage = true;
+                startX = e.clientX;
+                startY = e.clientY;
+                initialTranslateX = parseFloat(item.dataset.x);
+                initialTranslateY = parseFloat(item.dataset.y);
+                item.style.cursor = 'grabbing';
+            };
+        }
+
+        function exitEditMode() {
+            if (editingItem) {
+                editingItem.classList.remove('editing');
+                editingItem.draggable = true; // 恢复交换功能
+                editingItem.onwheel = null;
+                editingItem.onmousedown = null;
+                editingItem.style.cursor = 'pointer';
+                editingItem = null;
+            }
+        }
+
+        // 全局监听鼠标移动和松开（用于平移图片）
+        window.addEventListener('mousemove', function(e) {
+            if (!isDraggingImage || !editingItem) return;
+            e.preventDefault();
+            
+            const dx = e.clientX - startX;
+            const dy = e.clientY - startY;
+            
+            // 考虑缩放对移动速度的影响，稍微除以 scale 让移动更自然
+            const currentScale = parseFloat(editingItem.dataset.scale);
+            
+            const newX = initialTranslateX + dx;
+            const newY = initialTranslateY + dy;
+            
+            updateTransform(editingItem, currentScale, newX, newY);
+        });
+
+        window.addEventListener('mouseup', function() {
+            isDraggingImage = false;
+            if (editingItem) editingItem.style.cursor = 'move';
+        });
+
+        // 点击画布空白处退出编辑
+        document.body.addEventListener('click', function(e) {
+            if (editingItem && !editingItem.contains(e.target)) {
+                exitEditMode();
+            }
+        });
+
+        function updateTransform(item, scale, x, y) {
+            item.dataset.scale = scale;
+            item.dataset.x = x;
+            item.dataset.y = y;
+            const img = item.querySelector('img');
+            img.style.transform = `translate(${x}px, ${y}px) scale(${scale})`;
+        }
+
+        function resetTransform(item) {
+            updateTransform(item, 1, 0, 0);
+        }
+
+        // 导出图片
+        function downloadImage() {
+            // 导出前先退出编辑模式，去掉红色边框
+            exitEditMode();
+            
+            const node = document.getElementById('capture-area');
             html2canvas(node, {
                 backgroundColor: "#121212",
-                scale: 2 // 提高清晰度
+                scale: 2,
+                useCORS: true
             }).then(canvas => {
                 const link = document.createElement('a');
                 link.download = '我的推格子.png';
                 link.href = canvas.toDataURL();
                 link.click();
-            }).catch(err => {
-                alert('图片生成失败: ' + err);
             });
         }
     </script>
