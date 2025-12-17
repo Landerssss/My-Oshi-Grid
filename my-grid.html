@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>我的推格子生成器 (修复版)</title>
+    <!-- 使用国内 BootCDN 镜像，加载更快 -->
+    <script src="https://cdn.bootcdn.net/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <style>
+        /* 基础重置 */
+        * { box-sizing: border-box; }
+        
+        body {
+            font-family: sans-serif;
+            background-color: #121212; /* 深色背景 */
+            color: #ffffff;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        h1 { margin-bottom: 20px; color: #ff8fab; }
+
+        /* 控制栏样式 */
+        .controls {
+            background: #2d2d2d;
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 30px;
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            flex-wrap: wrap;
+            justify-content: center;
+            border: 1px solid #444;
+        }
+
+        select, button, input[type="text"] {
+            padding: 10px;
+            border-radius: 5px;
+            border: 1px solid #555;
+            background: #333;
+            color: white;
+            font-size: 14px;
+        }
+
+        button {
+            background-color: #ff8fab;
+            color: #000;
+            border: none;
+            font-weight: bold;
+            cursor: pointer;
+        }
+        button:hover { background-color: #ffb6c1; }
+
+        /* 画布区域 - 这是最终保存为图片的区域 */
+        #capture-area {
+            background-color: #121212;
+            padding: 30px;
+            border: 1px solid #333;
+            border-radius: 10px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            width: fit-content; /* 宽度自适应内容 */
+            margin: 0 auto;
+        }
+
+        /* 标题输入框 */
+        .grid-title {
+            background: transparent;
+            border: none;
+            color: white;
+            font-size: 28px;
+            font-weight: bold;
+            text-align: center;
+            margin-bottom: 20px;
+            width: 100%;
+            outline: none;
+        }
+
+        /* 格子容器 */
+        .grid-container {
+            display: grid;
+            gap: 10px;
+            /* 默认值，会被JS覆盖 */
+            grid-template-columns: repeat(3, 1fr); 
+        }
+
+        /* 单个格子样式 */
+        .grid-item {
+            background-color: #1e1e1e;
+            border: 2px dashed #444; /* 虚线边框，确保空状态可见 */
+            border-radius: 8px;
+            position: relative;
+            overflow: hidden;
+            cursor: pointer;
+            display: flex;
+            flex-direction: column;
+            transition: all 0.2s;
+        }
+
+        .grid-item:hover {
+            border-color: #ff8fab;
+            background-color: #2a2a2a;
+        }
+
+        /* 图片容器 */
+        .img-area {
+            flex: 1; /* 占据剩余空间 */
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+        }
+
+        /* 上传后的图片 */
+        .img-area img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover; /* 保持比例填满 */
+            display: none; /* 默认隐藏 */
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+
+        /* 加号提示 */
+        .upload-icon {
+            font-size: 40px;
+            color: #555;
+            pointer-events: none;
+        }
+
+        /* 底部文字输入 */
+        .item-input {
+            width: 100%;
+            background: rgba(0,0,0,0.8);
+            border: none;
+            color: #fff;
+            text-align: center;
+            font-size: 12px;
+            padding: 6px 2px;
+            outline: none;
+            z-index: 2; /* 确保在图片上方 */
+        }
+
+        .watermark {
+            margin-top: 15px;
+            color: #444;
+            font-size: 12px;
+            align-self: flex-end;
+        }
+
+        /* 隐藏文件输入框 */
+        #hidden-file-input { display: none; }
+
+    </style>
+</head>
+<body>
+
+    <h1>✨ 我的推格子 (My Oshi Grid)</h1>
+
+    <div class="controls">
+        <label>选择布局：</label>
+        <select id="layout-select">
+            <option value="3x3">九宫格 (3x3)</option>
+            <option value="4x3">大满贯 (4x3)</option>
+            <option value="5x3">宽屏 (5x3)</option>
+            <option value="2x2">四宫格 (2x2)</option>
+        </select>
+        <input type="text" id="main-title-input" value="我的年度动画列表" placeholder="输入总标题">
+        <button onclick="downloadImage()">⬇️ 保存图片</button>
+    </div>
+
+    <!-- 生成区域 -->
+    <div id="capture-area">
+        <input type="text" class="grid-title" id="display-title" value="我的年度动画列表">
+        
+        <div class="grid-container" id="grid-box">
+            <!-- JS 会在这里生成格子 -->
+        </div>
+
+        <div class="watermark">github.com/ywh555hhh/anime-role-grid</div>
+    </div>
+
+    <!-- 隐藏的 input 用于触发上传 -->
+    <input type="file" id="hidden-file-input" accept="image/*">
+
+    <script>
+        // 配置数据
+        const layouts = {
+            '3x3': { cols: 3, rows: 3, width: 110, height: 150 },
+            '4x3': { cols: 4, rows: 3, width: 100, height: 140 },
+            '5x3': { cols: 5, rows: 3, width: 90,  height: 130 },
+            '2x2': { cols: 2, rows: 2, width: 180, height: 240 }
+        };
+
+        const gridBox = document.getElementById('grid-box');
+        const layoutSelect = document.getElementById('layout-select');
+        const fileInput = document.getElementById('hidden-file-input');
+        const titleInput = document.getElementById('main-title-input');
+        const displayTitle = document.getElementById('display-title');
+        
+        let currentClickImg = null; // 记录当前点击的是哪个格子的图片
+
+        // 初始化
+        window.onload = function() {
+            render('3x3'); // 默认加载 3x3
+        };
+
+        // 切换布局
+        layoutSelect.addEventListener('change', (e) => {
+            render(e.target.value);
+        });
+
+        // 标题同步
+        titleInput.addEventListener('input', (e) => {
+            displayTitle.value = e.target.value;
+        });
+
+        // 核心渲染函数
+        function render(type) {
+            const config = layouts[type];
+            gridBox.innerHTML = ''; // 清空当前
+            
+            // 设置 CSS Grid
+            gridBox.style.gridTemplateColumns = `repeat(${config.cols}, ${config.width}px)`;
+
+            const total = config.cols * config.rows;
+
+            for(let i=0; i<total; i++) {
+                const item = document.createElement('div');
+                item.className = 'grid-item';
+                item.style.height = config.height + 'px';
+                
+                // 点击格子触发上传
+                item.onclick = function() {
+                    currentClickImg = this.querySelector('img'); // 找到这个格子里的 img 标签
+                    const icon = this.querySelector('.upload-icon'); // 找到图标
+                    
+                    // 绑定一个一次性的事件，用于上传后隐藏图标
+                    fileInput.onchange = function(e) {
+                        if (e.target.files && e.target.files[0]) {
+                            const reader = new FileReader();
+                            reader.onload = function(evt) {
+                                currentClickImg.src = evt.target.result;
+                                currentClickImg.style.display = 'block';
+                                icon.style.display = 'none'; // 隐藏加号
+                            };
+                            reader.readAsDataURL(e.target.files[0]);
+                        }
+                        fileInput.value = ''; // 清空，允许重复选同一张
+                    };
+                    
+                    fileInput.click(); // 触发真正的文件选择框
+                };
+
+                // 内部 HTML
+                item.innerHTML = `
+                    <div class="img-area">
+                        <span class="upload-icon">+</span>
+                        <img src="" alt="img">
+                    </div>
+                    <input type="text" class="item-input" placeholder="点击输入" onclick="event.stopPropagation()">
+                `;
+                // 注意：输入框的 onclick 需要阻止冒泡，否则会触发外层的上传图片
+                
+                gridBox.appendChild(item);
+            }
+        }
+
+        // 导出图片功能
+        function downloadImage() {
+            const node = document.getElementById('capture-area');
+            
+            if (typeof html2canvas === 'undefined') {
+                alert('图片生成插件未加载（可能是网络原因），请检查网络后刷新页面。');
+                return;
+            }
+
+            html2canvas(node, {
+                backgroundColor: "#121212",
+                scale: 2 // 提高清晰度
+            }).then(canvas => {
+                const link = document.createElement('a');
+                link.download = '我的推格子.png';
+                link.href = canvas.toDataURL();
+                link.click();
+            }).catch(err => {
+                alert('图片生成失败: ' + err);
+            });
+        }
+    </script>
+</body>
+</html>
